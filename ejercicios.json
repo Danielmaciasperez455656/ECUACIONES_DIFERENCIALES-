@@ -1,0 +1,32 @@
+{
+    "Principiante": [
+        {
+            "id": 1,
+            "tipo": "Exacta",
+            "enunciado_M": "2*x + y",
+            "enunciado_N": "x - 2*y"
+        },
+        {
+            "id": 2,
+            "tipo": "Exacta",
+            "enunciado_M": "y**2 + 2*x*y",
+            "enunciado_N": "x**2 + 2*x*y"
+        }
+    ],
+    "Intermedio": [
+        {
+            "id": 1,
+            "tipo": "Exacta",
+            "enunciado_M": "3*x**2*y + 2*x*y + y**3",
+            "enunciado_N": "x**2 + y**2 + x**3"
+        }
+    ],
+    "Pro": [
+        {
+            "id": 1,
+            "tipo": "Exacta",
+            "enunciado_M": "exp(x)*sin(y) - 3*y",
+            "enunciado_N": "exp(x)*cos(y) - 3*x"
+        }
+    ]
+}
