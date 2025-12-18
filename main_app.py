@@ -16,7 +16,6 @@ from ode_solver import EcuacionDiferencialSolver
 # =============================================================================
 # 🔑 CONFIGURACIÓN DE LA API
 # =============================================================================
-# Pega tu clave aquí abajo
 API_KEY = "AIzaSyALbTjqEJj-YiPUujPKxCEfWsSn-dPck1U" 
 # =============================================================================
 
@@ -57,11 +56,11 @@ class AIWorker(QThread):
         self.data = data
 
     def run(self):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
+        # Corregido a gemini-1.5-flash
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
         headers = {'Content-Type': 'application/json'}
         
         if self.mode == "generate":
-            # MEJORA: Prompt específico para evitar errores de sintaxis (math.exp)
             prompt = (f"Actúa como un profesor de cálculo avanzado. Genera UN problema de Ecuación Diferencial Exacta (o reducible por factor integrante) de dificultad '{self.data}'. "
                       "IMPORTANTE: Usa sintaxis matemática estándar compatible con SymPy (ej: usa 'exp(x)' NO 'math.exp(x)', usa 'sin(y)' NO 'math.sin(y)', usa 'sqrt(x)'). "
                       "Tu respuesta debe ser EXCLUSIVAMENTE un objeto JSON válido (sin markdown) con formato: "
@@ -90,7 +89,7 @@ class AIWorker(QThread):
                 self.finished_explanation.emit(text_resp)
 
         except Exception as e:
-            self.error.emit(f"Error de conexión: {str(e)}")
+            self.error.emit(f"Error: {str(e)}")
 
 # --- 3. TARJETA DE PASO ---
 class StepCard(QFrame):
@@ -181,34 +180,22 @@ class MainApp(QMainWindow):
         self.setStyleSheet("""
             QMainWindow { background-color: #f4f6f9; }
             QLabel { font-family: 'Segoe UI'; color: #2c3e50; }
-            
-            /* Sidebar */
             #Sidebar { background-color: #ffffff; border-right: 1px solid #d1d8e0; }
             #UniTitle { font-size: 18px; font-weight: bold; color: #1e3799; margin-top: 10px; }
             #CareerSubtitle { font-size: 13px; color: #576574; font-weight: 500; margin-bottom: 20px; }
-            
-            /* Inputs */
-            QLineEdit { 
-                padding: 10px; border: 2px solid #dfe6e9; border-radius: 8px; font-size: 14px; background: #fff;
-            }
+            #DevNames { font-size: 12px; color: #7f8c8d; font-style: italic; margin-bottom: 15px; }
+            QLineEdit { padding: 10px; border: 2px solid #dfe6e9; border-radius: 8px; font-size: 14px; background: #fff; }
             QLineEdit:focus { border: 2px solid #6c5ce7; }
-            
-            /* Botones */
             QPushButton { padding: 10px; border-radius: 8px; font-weight: bold; font-size: 13px; }
             #BtnSolve { background-color: #0984e3; color: white; border: none; }
             #BtnSolve:hover { background-color: #74b9ff; }
-            #BtnSolve:disabled { background-color: #b2bec3; }
-            
             #BtnAI { background-color: #6c5ce7; color: white; border: none; }
             #BtnAI:hover { background-color: #a29bfe; }
-            
-            /* Tarjetas */
-            #StepCard { background-color: white; border: 1px solid #dfe6e9; border-radius: 12px; }
+            #StepCard { background-color: white; border: 1px solid #dfe6e9; border-radius: 12px; padding: 10px; }
             #StepTitle { font-size: 16px; font-weight: bold; color: #0984e3; }
         """)
 
     def load_local_logo(self, filename="logo.png"):
-        """Carga el logo desde un archivo local"""
         if os.path.exists(filename):
             return QPixmap(filename)
         return None
@@ -221,33 +208,25 @@ class MainApp(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(10)
         
-        # --- SECCIÓN DE LOGO ---
         lbl_logo = QLabel()
         lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_logo.setFixedHeight(120) 
-        
-        # MEJORA: Carga el logo localmente
         pixmap = self.load_local_logo("logo.jpeg")
         if pixmap:
             lbl_logo.setPixmap(pixmap.scaled(110, 110, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         else:
-            lbl_logo.setText("[Guarda tu logo como 'logo.jpeg']")
+            lbl_logo.setText("[Logo no encontrado]")
             lbl_logo.setStyleSheet("border: 2px dashed #ccc; color: #999;")
         
         layout.addWidget(lbl_logo)
-
-        lbl_uni = QLabel("Universidad del Putumayo", objectName="UniTitle")
-        lbl_uni.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl_uni)
-
-        lbl_carrera = QLabel("Tecnología en Desarrollo de Software", objectName="CareerSubtitle")
-        lbl_carrera.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_carrera.setWordWrap(True)
-        layout.addWidget(lbl_carrera)
+        layout.addWidget(QLabel("Universidad del Putumayo", objectName="UniTitle", alignment=Qt.AlignmentFlag.AlignCenter))
+        layout.addWidget(QLabel("Tecnología en Desarrollo de Software", objectName="CareerSubtitle", alignment=Qt.AlignmentFlag.AlignCenter))
         
+        lbl_devs = QLabel("Daniel Alejandro Macías Pérez\nJose Leonel Enriquez Zambrano\nNeider Duvan Gindigua Machoa", objectName="DevNames")
+        lbl_devs.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lbl_devs)
         layout.addWidget(QLabel("<hr style='color:#eee'>"))
         
-        # --- ENTRADAS ---
         layout.addWidget(QLabel("<b>Función M(x, y):</b>"))
         self.m_input = QLineEdit()
         self.m_input.setPlaceholderText("Ej: 2*x*y")
@@ -266,8 +245,6 @@ class MainApp(QMainWindow):
         
         layout.addSpacing(10)
         layout.addWidget(QLabel("<hr style='color:#eee'>"))
-        
-        # --- SECCIÓN IA ---
         layout.addWidget(QLabel("<b>🧠 Generador IA</b>"))
         self.combo_diff = QComboBox()
         self.combo_diff.addItems(["Principiante", "Intermedio", "Avanzado"])
@@ -275,10 +252,14 @@ class MainApp(QMainWindow):
         
         self.btn_gen_ai = QPushButton("🎲 Ejercicio Sorpresa")
         self.btn_gen_ai.setObjectName("BtnAI")
-        self.btn_gen_ai.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_gen_ai.clicked.connect(self.generate_ai_exercise)
         layout.addWidget(self.btn_gen_ai)
         
+        btn_concepts = QPushButton("📘 Conceptos previos")
+        btn_concepts.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_concepts.clicked.connect(self.show_concepts_view)
+        layout.addWidget(btn_concepts)
+
         self.status_lbl = QLabel("")
         self.status_lbl.setStyleSheet("color: #666; font-size: 11px; margin-top: 5px;")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -293,18 +274,18 @@ class MainApp(QMainWindow):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(15)
         
-        lbl_res = QLabel("Solución Final")
-        lbl_res.setStyleSheet("font-size: 20px; font-weight: bold; color: #2d3436;")
-        layout.addWidget(lbl_res)
-        
+        self.lbl_res = QLabel("Solución Final")
+        self.lbl_res.setStyleSheet("font-size: 20px; font-weight: bold; color: #2d3436;")
+        layout.addWidget(self.lbl_res)
+
         self.final_res_viewer = MathViewer()
         self.final_res_viewer.setFixedHeight(80)
         self.final_res_viewer.setStyleSheet("border: 1px dashed #ccc; border-radius: 10px;")
         layout.addWidget(self.final_res_viewer)
         
-        lbl_steps = QLabel("Procedimiento Detallado")
-        lbl_steps.setStyleSheet("font-size: 16px; font-weight: bold; color: #2d3436; margin-top: 10px;")
-        layout.addWidget(lbl_steps)
+        self.lbl_steps = QLabel("Procedimiento Detallado")
+        self.lbl_steps.setStyleSheet("font-size: 16px; font-weight: bold; color: #2d3436; margin-top: 10px;")
+        layout.addWidget(self.lbl_steps)
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -318,7 +299,6 @@ class MainApp(QMainWindow):
         
         scroll.setWidget(self.steps_container)
         layout.addWidget(scroll)
-        
         self.main_layout.addWidget(content)
 
     def solve_manual(self):
@@ -326,12 +306,10 @@ class MainApp(QMainWindow):
         if not m or not n:
             self.status_lbl.setText("⚠️ Ingresa M y N")
             return
-        
         self.status_lbl.setText("Calculando...")
         self.process_solution(m, n)
 
     def process_solution(self, m, n):
-        # Limpiar pasos anteriores
         while self.steps_layout.count():
             child = self.steps_layout.takeAt(0)
             if child.widget(): child.widget().deleteLater()
@@ -350,14 +328,9 @@ class MainApp(QMainWindow):
             self.steps_layout.addWidget(card)
 
     def generate_ai_exercise(self):
-        if "PEGAR_TU_API_KEY" in API_KEY:
-            QMessageBox.critical(self, "API Key", "Falta configurar la API Key en el código.")
-            return
-
         diff = self.combo_diff.currentText()
         self.status_lbl.setText("⏳ IA Generando...")
-        self.btn_gen_ai.setEnabled(False) # Deshabilitar botón para evitar doble click
-        
+        self.btn_gen_ai.setEnabled(False)
         self.ai_thread = AIWorker("generate", diff)
         self.ai_thread.finished_exercise.connect(self.on_ai_exercise_ready)
         self.ai_thread.error.connect(self.on_ai_error)
@@ -365,35 +338,57 @@ class MainApp(QMainWindow):
 
     def on_ai_exercise_ready(self, data):
         self.btn_gen_ai.setEnabled(True)
-        
-        # MEJORA DE FLUJO: Solo llenar los campos, NO resolver automáticamente.
         self.m_input.setText(data.get('enunciado_M', ''))
         self.n_input.setText(data.get('enunciado_N', ''))
-        
-        # Limpiar resultados anteriores para evitar confusión
-        while self.steps_layout.count():
-            child = self.steps_layout.takeAt(0)
-            if child.widget(): child.widget().deleteLater()
-        self.final_res_viewer.set_formula("")
-        
-        self.status_lbl.setText("✅ Ejercicio Cargado. Dale a Resolver.")
-        QMessageBox.information(self, "Ejercicio Generado", "La IA ha creado un nuevo ejercicio.\n\nAnaliza las funciones M y N en los campos de texto y presiona 'Resolver' cuando estés listo para ver la solución.")
+        self.status_lbl.setText("✅ Cargado.")
 
     def on_ai_error(self, err_msg):
         self.btn_gen_ai.setEnabled(True)
-        self.status_lbl.setText("❌ Error IA")
         QMessageBox.warning(self, "Error", f"{err_msg}")
 
     def open_explanation_dialog(self, step_data):
         context = f"ED: ({self.m_input.text()})dx + ({self.n_input.text()})dy = 0"
         data = {"contexto": context, "paso_titulo": step_data['titulo'], "formula": step_data['formula']}
-        
         self.dialog = ExplanationDialog(self)
         self.dialog.show()
-        
         self.explainer_thread = AIWorker("explain", data)
         self.explainer_thread.finished_explanation.connect(self.dialog.set_text)
         self.explainer_thread.start()
+        
+    def show_concepts_view(self):
+        self.lbl_res.hide()
+        self.lbl_steps.hide()
+        self.final_res_viewer.hide()
+
+        while self.steps_layout.count():
+            child = self.steps_layout.takeAt(0)
+            if child.widget(): child.widget().deleteLater()
+
+        title = QLabel("📘 Conceptos Previos: Derivadas e Integrales")
+        title.setStyleSheet("font-size:18px; font-weight:bold; color:#2d3436;")
+        self.steps_layout.addWidget(title)
+
+        # Derivadas
+        self.steps_layout.addWidget(QLabel("🔹 <b>Derivadas</b>", styleSheet="font-size:16px;"))
+        self.steps_layout.addWidget(QLabel("Derivar significa calcular la razón de cambio...", wordWrap=True))
+        dv = MathViewer(); dv.set_formula(r"\frac{d}{dx}(x^n) = n x^{n-1}"); self.steps_layout.addWidget(dv)
+
+        # Integrales
+        self.steps_layout.addWidget(QLabel("🔹 <b>Integrales</b>", styleSheet="font-size:16px;"))
+        self.steps_layout.addWidget(QLabel("Integrar es el proceso inverso de derivar...", wordWrap=True))
+        iv = MathViewer(); iv.set_formula(r"\int x^n \, dx = \frac{x^{n+1}}{n+1} + C"); self.steps_layout.addWidget(iv)
+
+        btn_back = QPushButton("🔙 Volver a la solución")
+        btn_back.setStyleSheet("background-color: #0984e3; color: white; padding: 14px; border-radius: 10px; font-weight: bold; margin-top: 20px;")
+        btn_back.clicked.connect(self.restore_solution_view)
+        self.steps_layout.addWidget(btn_back)
+        self.steps_layout.addStretch() # Asegura visibilidad del botón
+
+    def restore_solution_view(self):
+        self.lbl_res.show()
+        self.lbl_steps.show()
+        self.final_res_viewer.show()
+        self.solve_manual()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

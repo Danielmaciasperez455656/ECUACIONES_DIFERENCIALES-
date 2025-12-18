@@ -26,115 +26,148 @@ class EcuacionDiferencialSolver:
             })
 
         try:
-            # 0. Limpieza y conversión
-            # Eliminamos 'math.' por si la IA o el usuario lo escriben, ya que SymPy usa su propia sintaxis
+            # =========================================================
+            # 0. LIMPIEZA Y NORMALIZACIÓN DE ENTRADAS
+            # =========================================================
+            
+            # Quitar prefijos innecesarios
             M_str = M_str.replace("math.", "").replace("Math.", "")
             N_str = N_str.replace("math.", "").replace("Math.", "")
 
-            # Convertir texto a objetos SymPy
+            # 👉 MEJORA: permitir usar ^ como potencia
+            M_str = M_str.replace("^", "**")
+            N_str = N_str.replace("^", "**")
+
+            # Convertir texto a expresiones SymPy
             M = sp.sympify(M_str)
             N = sp.sympify(N_str)
             
-            # --- Paso 1: Verificar Exactitud ---
+            # =========================================================
+            # 1. VERIFICAR EXACTITUD
+            # =========================================================
             dM_dy = sp.diff(M, self.y)
             dN_dx = sp.diff(N, self.x)
             
-            check_latex = f"\\frac{{\\partial M}}{{\\partial y}} = {sp.latex(dM_dy)} \\quad \\text{{y}} \\quad \\frac{{\\partial N}}{{\\partial x}} = {sp.latex(dN_dx)}"
+            check_latex = (
+                f"\\frac{{\\partial M}}{{\\partial y}} = {sp.latex(dM_dy)} "
+                f"\\quad , \\quad "
+                f"\\frac{{\\partial N}}{{\\partial x}} = {sp.latex(dN_dx)}"
+            )
             
             agregar_paso(
                 "1. Verificar Exactitud",
-                "Calculamos las derivadas parciales cruzadas para verificar si es exacta.",
+                "Calculamos las derivadas parciales cruzadas para verificar si la ecuación es exacta.",
                 check_latex
             )
 
             exacta = dM_dy.equals(dN_dx)
 
-            # --- LÓGICA DE FACTOR INTEGRANTE (Si no es exacta) ---
+            # =========================================================
+            # 1.1 FACTOR INTEGRANTE (SI NO ES EXACTA)
+            # =========================================================
             if not exacta:
-                agregar_paso("No es Exacta", "Las derivadas son diferentes. Buscaremos un Factor Integrante (μ) para convertirla en exacta.", r"\frac{\partial M}{\partial y} \neq \frac{\partial N}{\partial x}")
+                agregar_paso(
+                    "No es Exacta",
+                    "Las derivadas parciales no coinciden. Buscamos un factor integrante.",
+                    r"\frac{\partial M}{\partial y} \neq \frac{\partial N}{\partial x}"
+                )
                 
                 mu = None
-                tipo_factor = ""
+                explicacion_mu = ""
 
-                # Caso A: Factor integrante depende solo de x: (My - Nx) / N
-                factor_x = (dM_dy - dN_dx) / N
-                factor_x = sp.simplify(factor_x)
-                
-                # Verificamos si factor_x no tiene 'y' (es solo de x o constante)
+                # Factor integrante dependiente de x
+                factor_x = sp.simplify((dM_dy - dN_dx) / N)
                 if self.y not in factor_x.free_symbols:
                     mu = sp.exp(sp.integrate(factor_x, self.x))
-                    tipo_factor = "x"
-                    explicacion_mu = f"Encontramos que \\frac{{M_y - N_x}}{{N}} depende solo de x. El factor integrante es: \\mu(x) = e^{{\\int ({sp.latex(factor_x)}) dx}}"
+                    explicacion_mu = (
+                        r"El factor integrante depende solo de $x$: "
+                        r"$\mu(x) = e^{\int (" + sp.latex(factor_x) + r") dx}$"
+                    )
 
-                # Caso B: Factor integrante depende solo de y: (Nx - My) / M
+                # Factor integrante dependiente de y
                 if mu is None:
-                    factor_y = (dN_dx - dM_dy) / M
-                    factor_y = sp.simplify(factor_y)
-                    
+                    factor_y = sp.simplify((dN_dx - dM_dy) / M)
                     if self.x not in factor_y.free_symbols:
                         mu = sp.exp(sp.integrate(factor_y, self.y))
-                        tipo_factor = "y"
-                        explicacion_mu = f"Encontramos que \\frac{{N_x - M_y}}{{M}} depende solo de y. El factor integrante es: \\mu(y) = e^{{\\int ({sp.latex(factor_y)}) dy}}"
+                        explicacion_mu = (
+                            r"El factor integrante depende solo de $y$: "
+                            r"$\mu(y) = e^{\int (" + sp.latex(factor_y) + r") dy}$"
+                        )
 
-                if mu is not None:
-                    mu = sp.simplify(mu)
-                    agregar_paso("1.1 Factor Integrante Hallado", explicacion_mu, f"\\mu = {sp.latex(mu)}")
-                    
-                    # Multiplicamos la ecuación original por mu
-                    M = sp.simplify(M * mu)
-                    N = sp.simplify(N * mu)
-                    
-                    agregar_paso("1.2 Nueva Ecuación Exacta", 
-                                 "Multiplicamos M y N por el factor integrante (μ). Ahora la ecuación es exacta.", 
-                                 f"\\tilde{{M}} = {sp.latex(M)}, \\quad \\tilde{{N}} = {sp.latex(N)}")
-                else:
-                    agregar_paso("Error", "No se encontró un factor integrante sencillo (dependiente solo de x o y).", r"\text{Método no aplicable}")
+                if mu is None:
+                    agregar_paso(
+                        "Error",
+                        "No se encontró un factor integrante sencillo.",
+                        r"\text{Método no aplicable}"
+                    )
                     return None, pasos
 
-            # --- RESOLUCIÓN DE LA ECUACIÓN EXACTA (Ya sea original o transformada) ---
-            
-            # Paso 2: Integrar M respecto a x
-            F_xy_M_raw = sp.integrate(M, self.x)
+                mu = sp.simplify(mu)
+                agregar_paso(
+                    "1.1 Factor Integrante",
+                    explicacion_mu,
+                    f"\\mu = {sp.latex(mu)}"
+                )
+
+                M = sp.simplify(M * mu)
+                N = sp.simplify(N * mu)
+
+                agregar_paso(
+                    "1.2 Nueva Ecuación Exacta",
+                    "Multiplicamos M y N por el factor integrante.",
+                    f"\\tilde{{M}} = {sp.latex(M)}, \\quad \\tilde{{N}} = {sp.latex(N)}"
+                )
+
+            # =========================================================
+            # 2. INTEGRAR M RESPECTO A x
+            # =========================================================
+            F_xy = sp.integrate(M, self.x)
             agregar_paso(
                 "2. Integrar M respecto a x",
-                "Integramos la función M (actual) con respecto a x. Añadimos g(y).",
-                f"F(x, y) = \\int ({sp.latex(M)}) dx = {sp.latex(F_xy_M_raw)} + g(y)"
+                "Integramos M con respecto a x y añadimos g(y).",
+                f"F(x,y) = {sp.latex(F_xy)} + g(y)"
             )
-            
-            # Paso 3: Derivar F respecto a y
-            dF_dy_raw = sp.diff(F_xy_M_raw, self.y)
-            g_prime_expr = sp.simplify(N - dF_dy_raw)
-            
+
+            # =========================================================
+            # 3. ENCONTRAR g'(y)
+            # =========================================================
+            dF_dy = sp.diff(F_xy, self.y)
+            g_prime = sp.simplify(N - dF_dy)
+
             agregar_paso(
                 "3. Encontrar g'(y)",
-                "Derivamos el resultado anterior respecto a 'y' e igualamos a N. Despejamos g'(y).",
-                f"g'(y) = N - \\frac{{\\partial F}}{{\\partial y}} = {sp.latex(g_prime_expr)}"
+                "Derivamos F respecto a y y lo igualamos a N.",
+                f"g'(y) = {sp.latex(g_prime)}"
             )
-            
-            # Paso 4: Integrar g'(y)
-            g_y = sp.integrate(g_prime_expr, self.y)
+
+            # =========================================================
+            # 4. INTEGRAR g'(y)
+            # =========================================================
+            g_y = sp.integrate(g_prime, self.y)
             agregar_paso(
                 "4. Obtener g(y)",
-                "Integramos g'(y) para hallar la función constante.",
-                f"g(y) = \\int ({sp.latex(g_prime_expr)}) dy = {sp.latex(g_y)}"
+                "Integramos g'(y).",
+                f"g(y) = {sp.latex(g_y)}"
             )
-            
-            # Paso 5: Solución Final
-            solucion_simbolica = F_xy_M_raw + g_y
-            # Intentar simplificar un poco la solución final
-            solucion_simbolica = sp.simplify(solucion_simbolica)
-            
-            solucion_final_eq = sp.Eq(solucion_simbolica, self.C)
-            
+
+            # =========================================================
+            # 5. SOLUCIÓN FINAL
+            # =========================================================
+            solucion = sp.simplify(F_xy + g_y)
+            solucion_eq = sp.Eq(solucion, self.C)
+
             agregar_paso(
-                
                 "5. Solución General",
-                "Unimos las partes para formar la solución implícita F(x,y) = C.",
-                sp.latex(solucion_final_eq)
+                "La solución implícita de la ecuación diferencial es:",
+                sp.latex(solucion_eq)
             )
-            
-            return sp.latex(solucion_final_eq), pasos
-            
+
+            return sp.latex(solucion_eq), pasos
+
         except Exception as e:
-            pasos.append({"titulo": "Error Matemático", "texto": f"No se pudo procesar: {str(e)}", "formula": ""})
+            pasos.append({
+                "titulo": "Error Matemático",
+                "texto": f"No se pudo procesar la expresión: {str(e)}",
+                "formula": ""
+            })
             return None, pasos
