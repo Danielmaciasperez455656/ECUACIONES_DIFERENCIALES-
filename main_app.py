@@ -13,41 +13,56 @@ try:
 except:
     API_KEY = "" 
 
-# --- 3. FUNCIONES AUXILIARES (LIBRERÍA OFICIAL GOOGLE) ---
+# --- 3. FUNCIONES AUXILIARES (MODO TODOTERRENO) ---
 def get_ai_data(prompt_text):
     if not API_KEY:
         st.error("⚠️ Error: No se encontró la API KEY en los Secrets.")
         return None
     
+    # Configuración oficial
     try:
-        # Configuración oficial de Google
         genai.configure(api_key=API_KEY)
-        
-        # Usamos 'gemini-1.5-flash' que es rápido y estable
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # Generamos la respuesta
-        response = model.generate_content(prompt_text)
-        return response.text
-        
     except Exception as e:
-        st.error(f"Error de conexión con IA: {str(e)}")
+        st.error(f"Error configurando API Key: {e}")
         return None
+
+    # LISTA DE MODELOS A PROBAR (Si falla uno, prueba el siguiente)
+    # Esto soluciona tu error 404 porque busca hasta encontrar uno compatible con tu clave.
+    modelos_a_probar = [
+        'gemini-1.5-flash',
+        'gemini-1.5-flash-latest',
+        'gemini-pro',       # El clásico confiable
+        'gemini-1.0-pro'
+    ]
+
+    errores = []
+
+    for nombre_modelo in modelos_a_probar:
+        try:
+            model = genai.GenerativeModel(nombre_modelo)
+            response = model.generate_content(prompt_text)
+            return response.text  # ¡Éxito! Retornamos la respuesta
+        except Exception as e:
+            # Si falla, guardamos el error y probamos el siguiente
+            errores.append(f"{nombre_modelo}: {str(e)}")
+            continue
+    
+    # Si llegamos aquí, fallaron todos
+    st.error(f"❌ No se pudo conectar con ningún modelo de IA. Detalles: {errores}")
+    return None
 
 # --- 4. BARRA LATERAL ---
 with st.sidebar:
     st.header("🏫 UNIPUTUMAYO")
     st.write("Tecnología en Desarrollo de Software")
     
-    # Logo opcional
-    if os.path.exists("logo.jpeg"):
-        st.image("logo.jpeg", width=120)
-
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=120)
+    
     st.divider()
     
     st.subheader("Entrada de Datos")
     
-    # Inputs vinculados a claves de sesión para que la IA pueda escribir en ellos
     m_input = st.text_input("Función M(x, y)", placeholder="Ej: 2*x*y", key="m_input_key")
     n_input = st.text_input("Función N(x, y)", placeholder="Ej: x**2", key="n_input_key")
     
@@ -61,7 +76,7 @@ with st.sidebar:
         if not API_KEY:
             st.error("❌ Faltan los Secrets (Clave API).")
         else:
-            with st.spinner("Generando ejercicio..."):
+            with st.spinner("Intentando conectar con IA..."):
                 prompt = (f"Genera un problema de Ecuación Diferencial Exacta nivel {diff}. "
                           "IMPORTANTE: Responde SOLO con un JSON válido. "
                           "Formato: {'enunciado_M': '...', 'enunciado_N': '...'}. "
@@ -71,18 +86,16 @@ with st.sidebar:
                 
                 if res:
                     try:
-                        # Limpiamos el texto por si la IA agrega ```json
                         clean_res = res.replace("```json", "").replace("```", "").strip()
                         data_json = json.loads(clean_res)
                         
-                        # Actualizamos las cajas de texto automáticamente
                         st.session_state.m_input_key = data_json['enunciado_M']
                         st.session_state.n_input_key = data_json['enunciado_N']
                         
                         st.toast("✅ ¡Ejercicio Generado!", icon="🎉")
-                        st.rerun() # Recargamos la página para ver los cambios
+                        st.rerun()
                     except Exception as e:
-                        st.error("La IA no devolvió un formato válido. Intenta de nuevo.")
+                        st.error("La IA respondió pero el formato no era válido. Intenta de nuevo.")
 
 # --- 5. ÁREA PRINCIPAL ---
 st.title("📘 Solucionador de Ecuaciones Diferenciales")
