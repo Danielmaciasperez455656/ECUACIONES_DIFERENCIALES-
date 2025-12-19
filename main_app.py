@@ -1,402 +1,112 @@
-import sys
-import os
+import streamlit as st
 import json
 import requests
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QLabel, QLineEdit, QComboBox, QScrollArea, QFrame,
-    QDialog, QTextEdit, QMessageBox
-)
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QByteArray
-from PyQt6.QtGui import QPixmap, QImage
+import os
+from ode_solver import EcuacionDiferencialSolver
 
-from ode_solver import EcuacionDiferencialSolver 
+# --- 1. CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="ED-Solver UNIPUTUMAYO", page_icon="∫", layout="wide")
 
-# =============================================================================
-# 🔑 CONFIGURACIÓN DE LA API
-# =============================================================================
-# Pega tu clave aquí abajo
-API_KEY = "AIzaSyALbTjqEJj-YiPUujPKxCEfWsSn-dPck1U" 
-# =============================================================================
+# --- 2. GESTIÓN DE API KEY (SECRETS) ---
+# Intentamos leer la clave de los "Secretos" de Streamlit Cloud.
+# Si falla (porque estás en tu PC), usa una clave temporal o pide ingresarla.
+try:
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    # Opción de respaldo para pruebas locales si no has configurado secrets.toml
+    API_KEY = "" 
 
-# --- 1. VISOR MATEMÁTICO ---
-class MathViewer(QWebEngineView):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(90)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.page().setBackgroundColor(Qt.GlobalColor.transparent)
-        
-        self.html_template = """
-        <!DOCTYPE html><html><head>
-            <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML"></script>
-            <style>
-                body {{ font-family: 'Segoe UI', sans-serif; font-size: 18px; color: #333; margin: 0; padding: 5px; display: flex; justify-content: center; align-items: center; overflow: hidden; }}
-                .MathJax_Display {{ margin: 0 !important; }}
-            </style>
-        </head><body><div id="math">{}</div></body></html>
-        """
-        self.setHtml(self.html_template.format(""))
-
-    def set_formula(self, latex):
-        if not latex: latex = ""
-        safe_latex = f"$${latex}$$"
-        content = self.html_template.format(safe_latex)
-        self.setHtml(content)
-
-# --- 2. WORKER DE IA ---
-class AIWorker(QThread):
-    finished_exercise = pyqtSignal(dict)
-    finished_explanation = pyqtSignal(str)
-    error = pyqtSignal(str)
-
-    def __init__(self, mode, data):
-        super().__init__()
-        self.mode = mode
-        self.data = data
-
-    def run(self):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
-        headers = {'Content-Type': 'application/json'}
-        
-        if self.mode == "generate":
-            # MEJORA: Prompt específico para evitar errores de sintaxis (math.exp)
-            prompt = (f"Actúa como un profesor de cálculo avanzado. Genera UN problema de Ecuación Diferencial Exacta (o reducible por factor integrante) de dificultad '{self.data}'. "
-                      "IMPORTANTE: Usa sintaxis matemática estándar compatible con SymPy (ej: usa 'exp(x)' NO 'math.exp(x)', usa 'sin(y)' NO 'math.sin(y)', usa 'sqrt(x)'). "
-                      "Tu respuesta debe ser EXCLUSIVAMENTE un objeto JSON válido (sin markdown) con formato: "
-                      "{'enunciado_M': 'expresion_python_sympy', 'enunciado_N': 'expresion_python_sympy'}.")
-        
-        elif self.mode == "explain":
-            prompt = (f"Actúa como un profesor. Un estudiante no entiende este paso:\n"
-                      f"Contexto ED: {self.data['contexto']}\n"
-                      f"Paso actual: {self.data['paso_titulo']}\n"
-                      f"Fórmula del paso: {self.data['formula']}\n"
-                      f"Explica breve y didácticamente qué operación matemática se hizo para llegar a ese resultado.")
-
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-
-        try:
-            response = requests.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
-            text_resp = result['candidates'][0]['content']['parts'][0]['text']
-
-            if self.mode == "generate":
-                clean_text = text_resp.replace('```json', '').replace('```', '').strip()
-                data_dict = json.loads(clean_text)
-                self.finished_exercise.emit(data_dict)
-            else:
-                self.finished_explanation.emit(text_resp)
-
-        except Exception as e:
-            self.error.emit(f"Error de conexión: {str(e)}")
-
-# --- 3. TARJETA DE PASO ---
-class StepCard(QFrame):
-    def __init__(self, step_data, parent_app):
-        super().__init__()
-        self.step_data = step_data
-        self.parent_app = parent_app
-        self.init_ui()
-
-    def init_ui(self):
-        self.setObjectName("StepCard")
-        layout = QVBoxLayout(self)
-        layout.setSpacing(5)
-        
-        lbl_title = QLabel(self.step_data['titulo'])
-        lbl_title.setObjectName("StepTitle")
-        layout.addWidget(lbl_title)
-        
-        lbl_text = QLabel(self.step_data['texto'])
-        lbl_text.setWordWrap(True)
-        lbl_text.setObjectName("StepText")
-        layout.addWidget(lbl_text)
-        
-        if self.step_data['formula']:
-            viewer = MathViewer()
-            viewer.set_formula(self.step_data['formula'])
-            layout.addWidget(viewer)
-            
-        btn_ask = QPushButton("🤖 Explícame este paso")
-        btn_ask.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_ask.setObjectName("BtnAskAI")
-        btn_ask.clicked.connect(self.ask_ai)
-        layout.addWidget(btn_ask, alignment=Qt.AlignmentFlag.AlignRight)
-
-    def ask_ai(self):
-        self.parent_app.open_explanation_dialog(self.step_data)
-
-# --- 4. VENTANA EMERGENTE ---
-class ExplanationDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Profe IA - Explicación")
-        self.setFixedSize(500, 400)
-        self.setStyleSheet("background-color: white;")
-        
-        layout = QVBoxLayout(self)
-        
-        self.lbl_info = QLabel("🤖 <b>Analizando tu duda...</b>")
-        self.lbl_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_info.setStyleSheet("font-size: 14px; color: #6c5ce7;")
-        layout.addWidget(self.lbl_info)
-        
-        self.text_area = QTextEdit()
-        self.text_area.setReadOnly(True)
-        self.text_area.setStyleSheet("border: 1px solid #eee; padding: 10px; font-size: 14px; color: #333; background-color: #f9f9f9;")
-        layout.addWidget(self.text_area)
-        
-        self.btn_close = QPushButton("¡Entendido!")
-        self.btn_close.clicked.connect(self.accept)
-        self.btn_close.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px;")
-        self.btn_close.hide()
-        layout.addWidget(self.btn_close)
-
-    def set_text(self, text):
-        self.lbl_info.setText("🤖 <b>Explicación:</b>")
-        self.text_area.setMarkdown(text)
-        self.btn_close.show()
-
-# --- 5. APLICACIÓN PRINCIPAL ---
-class MainApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("ED-Solver: UNIPUTUMAYO")
-        self.setGeometry(100, 100, 1200, 800)
-        self.solver = EcuacionDiferencialSolver()
-        
-        self.apply_styles()
-        
-        central = QWidget()
-        self.setCentralWidget(central)
-        self.main_layout = QHBoxLayout(central)
-        self.main_layout.setContentsMargins(0,0,0,0)
-        
-        self.create_sidebar()
-        self.create_content_area()
-        
-    def apply_styles(self):
-        self.setStyleSheet("""
-            QMainWindow { background-color: #f4f6f9; }
-            QLabel { font-family: 'Segoe UI'; color: #2c3e50; }
-            
-            /* Sidebar */
-            #Sidebar { background-color: #ffffff; border-right: 1px solid #d1d8e0; }
-            #UniTitle { font-size: 18px; font-weight: bold; color: #1e3799; margin-top: 10px; }
-            #CareerSubtitle { font-size: 13px; color: #576574; font-weight: 500; margin-bottom: 20px; }
-            
-            /* Inputs */
-            QLineEdit { 
-                padding: 10px; border: 2px solid #dfe6e9; border-radius: 8px; font-size: 14px; background: #fff;
-            }
-            QLineEdit:focus { border: 2px solid #6c5ce7; }
-            
-            /* Botones */
-            QPushButton { padding: 10px; border-radius: 8px; font-weight: bold; font-size: 13px; }
-            #BtnSolve { background-color: #0984e3; color: white; border: none; }
-            #BtnSolve:hover { background-color: #74b9ff; }
-            #BtnSolve:disabled { background-color: #b2bec3; }
-            
-            #BtnAI { background-color: #6c5ce7; color: white; border: none; }
-            #BtnAI:hover { background-color: #a29bfe; }
-            
-            /* Tarjetas */
-            #StepCard { background-color: white; border: 1px solid #dfe6e9; border-radius: 12px; }
-            #StepTitle { font-size: 16px; font-weight: bold; color: #0984e3; }
-        """)
-
-    def load_local_logo(self, filename="logo.png"):
-        """Carga el logo desde un archivo local"""
-        if os.path.exists(filename):
-            return QPixmap(filename)
+# --- 3. FUNCIONES AUXILIARES ---
+def get_ai_data(prompt_text):
+    if not API_KEY:
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
+    try:
+        resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt_text}]}]})
+        return resp.json()['candidates'][0]['content']['parts'][0]['text']
+    except:
         return None
 
-    def create_sidebar(self):
-        sidebar = QFrame()
-        sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(320)
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(10)
-        
-        # --- SECCIÓN DE LOGO ---
-        lbl_logo = QLabel()
-        lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_logo.setFixedHeight(120) 
-        
-        # MEJORA: Carga el logo localmente
-        pixmap = self.load_local_logo("logo.jpeg")
-        if pixmap:
-            lbl_logo.setPixmap(pixmap.scaled(110, 110, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+# --- 4. BARRA LATERAL (SIDEBAR) ---
+with st.sidebar:
+    st.header("🏫 UNIPUTUMAYO")
+    st.write("Tecnología en Desarrollo de Software")
+    
+    st.divider()
+    
+    st.subheader("Entrada de Datos")
+    m_input = st.text_input("Función M(x, y)", value="", placeholder="Ej: 2*x*y")
+    n_input = st.text_input("Función N(x, y)", value="", placeholder="Ej: x**2")
+    
+    btn_resolver = st.button("✨ Resolver Ecuación", type="primary")
+
+    st.divider()
+    st.subheader("🧠 Generador IA")
+    diff = st.selectbox("Dificultad", ["Principiante", "Intermedio"])
+    
+    if st.button("🎲 Generar Ejercicio"):
+        if not API_KEY:
+            st.error("Falta configurar la API KEY en Secrets.")
         else:
-            lbl_logo.setText("[Guarda tu logo como 'logo.jpeg']")
-            lbl_logo.setStyleSheet("border: 2px dashed #ccc; color: #999;")
-        
-        layout.addWidget(lbl_logo)
+            with st.spinner("Generando..."):
+                prompt = (f"Genera un problema de Ecuación Diferencial Exacta nivel {diff}. "
+                          "Responde SOLO JSON: {'enunciado_M': '...', 'enunciado_N': '...'}. "
+                          "Usa sintaxis SymPy (exp(x), sin(y)).")
+                res = get_ai_data(prompt)
+                if res:
+                    try:
+                        clean_json = json.loads(res.replace('```json', '').replace('```', ''))
+                        st.session_state['m_val'] = clean_json['enunciado_M']
+                        st.session_state['n_val'] = clean_json['enunciado_N']
+                        st.rerun() # Recarga la página para poner los valores
+                    except:
+                        st.error("Error leyendo respuesta IA")
 
-        lbl_uni = QLabel("Universidad del Putumayo", objectName="UniTitle")
-        lbl_uni.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl_uni)
+# --- LÓGICA DE ACTUALIZACIÓN DE CAMPOS ---
+if 'm_val' in st.session_state:
+    m_input = st.session_state['m_val']
+    n_input = st.session_state['n_val']
+    # Limpiamos variables de sesión para permitir edición manual posterior
+    del st.session_state['m_val']
+    del st.session_state['n_val']
 
-        lbl_carrera = QLabel("Tecnología en Desarrollo de Software", objectName="CareerSubtitle")
-        lbl_carrera.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_carrera.setWordWrap(True)
-        layout.addWidget(lbl_carrera)
-        
-        layout.addWidget(QLabel("<hr style='color:#eee'>"))
-        
-        # --- ENTRADAS ---
-        layout.addWidget(QLabel("<b>Función M(x, y):</b>"))
-        self.m_input = QLineEdit()
-        self.m_input.setPlaceholderText("Ej: 2*x*y")
-        layout.addWidget(self.m_input)
-        
-        layout.addWidget(QLabel("<b>Función N(x, y):</b>"))
-        self.n_input = QLineEdit()
-        self.n_input.setPlaceholderText("Ej: x**2")
-        layout.addWidget(self.n_input)
-        
-        self.btn_solve = QPushButton("✨ Resolver")
-        self.btn_solve.setObjectName("BtnSolve")
-        self.btn_solve.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_solve.clicked.connect(self.solve_manual)
-        layout.addWidget(self.btn_solve)
-        
-        layout.addSpacing(10)
-        layout.addWidget(QLabel("<hr style='color:#eee'>"))
-        
-        # --- SECCIÓN IA ---
-        layout.addWidget(QLabel("<b>🧠 Generador IA</b>"))
-        self.combo_diff = QComboBox()
-        self.combo_diff.addItems(["Principiante", "Intermedio", "Avanzado"])
-        layout.addWidget(self.combo_diff)
-        
-        self.btn_gen_ai = QPushButton("🎲 Ejercicio Sorpresa")
-        self.btn_gen_ai.setObjectName("BtnAI")
-        self.btn_gen_ai.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_gen_ai.clicked.connect(self.generate_ai_exercise)
-        layout.addWidget(self.btn_gen_ai)
-        
-        self.status_lbl = QLabel("")
-        self.status_lbl.setStyleSheet("color: #666; font-size: 11px; margin-top: 5px;")
-        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_lbl)
-        
-        layout.addStretch()
-        self.main_layout.addWidget(sidebar)
+# --- 5. ÁREA PRINCIPAL ---
+st.title("📘 Solucionador de Ecuaciones Diferenciales")
+st.markdown("Herramienta para resolver Ecuaciones Exactas y por Factor Integrante.")
 
-    def create_content_area(self):
-        content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-        
-        lbl_res = QLabel("Solución Final")
-        lbl_res.setStyleSheet("font-size: 20px; font-weight: bold; color: #2d3436;")
-        layout.addWidget(lbl_res)
-        
-        self.final_res_viewer = MathViewer()
-        self.final_res_viewer.setFixedHeight(80)
-        self.final_res_viewer.setStyleSheet("border: 1px dashed #ccc; border-radius: 10px;")
-        layout.addWidget(self.final_res_viewer)
-        
-        lbl_steps = QLabel("Procedimiento Detallado")
-        lbl_steps.setStyleSheet("font-size: 16px; font-weight: bold; color: #2d3436; margin-top: 10px;")
-        layout.addWidget(lbl_steps)
-        
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none; background-color: transparent;")
-        
-        self.steps_container = QWidget()
-        self.steps_container.setStyleSheet("background-color: transparent;")
-        self.steps_layout = QVBoxLayout(self.steps_container)
-        self.steps_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.steps_layout.setSpacing(15)
-        
-        scroll.setWidget(self.steps_container)
-        layout.addWidget(scroll)
-        
-        self.main_layout.addWidget(content)
-
-    def solve_manual(self):
-        m, n = self.m_input.text(), self.n_input.text()
-        if not m or not n:
-            self.status_lbl.setText("⚠️ Ingresa M y N")
-            return
-        
-        self.status_lbl.setText("Calculando...")
-        self.process_solution(m, n)
-
-    def process_solution(self, m, n):
-        # Limpiar pasos anteriores
-        while self.steps_layout.count():
-            child = self.steps_layout.takeAt(0)
-            if child.widget(): child.widget().deleteLater()
-            
-        sol, pasos = self.solver.resolver_exacta(m, n)
+if btn_resolver:
+    if m_input and n_input:
+        solver = EcuacionDiferencialSolver()
+        # Usamos tu lógica existente
+        sol, pasos = solver.resolver_exacta(m_input, n_input)
         
         if sol:
-            self.final_res_viewer.set_formula(sol)
-            self.status_lbl.setText("✅ Resuelto")
+            st.success("✅ ¡Ecuación Resuelta con Éxito!")
+            st.markdown(f"### Solución General:  $${sol}$$")
+            
+            st.markdown("---")
+            st.subheader("📝 Procedimiento Paso a Paso")
+            
+            for i, paso in enumerate(pasos):
+                # Usamos 'expander' para que se vea ordenado como acordeón
+                with st.expander(f"Paso {i+1}: {paso['titulo']}", expanded=True):
+                    st.write(paso['texto'])
+                    st.latex(paso['formula'])
+                    
+                    if st.button("🤖 Explicar este paso", key=f"btn_explain_{i}"):
+                        if not API_KEY:
+                            st.warning("Configura la API Key para explicaciones.")
+                        else:
+                            with st.spinner("Analizando..."):
+                                p_expl = f"Explica brevemente este paso: {paso['titulo']} con fórmula {paso['formula']} en el contexto de ED."
+                                expl = get_ai_data(p_expl)
+                                st.info(f"💡 **Explicación IA:** {expl}")
         else:
-            self.final_res_viewer.set_formula(r"\text{Sin solución / Error de sintaxis}")
-            self.status_lbl.setText("❌ Error")
-        
-        for paso in pasos:
-            card = StepCard(paso, self)
-            self.steps_layout.addWidget(card)
+            st.error("⚠️ No se encontró solución o hubo un error de sintaxis.")
+            if pasos:
+                st.warning(f"Detalle: {paso[0]['texto']}")
+    else:
+        st.warning("⚠️ Por favor ingresa las funciones M y N.")
 
-    def generate_ai_exercise(self):
-        if "PEGAR_TU_API_KEY" in API_KEY:
-            QMessageBox.critical(self, "API Key", "Falta configurar la API Key en el código.")
-            return
-
-        diff = self.combo_diff.currentText()
-        self.status_lbl.setText("⏳ IA Generando...")
-        self.btn_gen_ai.setEnabled(False) # Deshabilitar botón para evitar doble click
-        
-        self.ai_thread = AIWorker("generate", diff)
-        self.ai_thread.finished_exercise.connect(self.on_ai_exercise_ready)
-        self.ai_thread.error.connect(self.on_ai_error)
-        self.ai_thread.start()
-
-    def on_ai_exercise_ready(self, data):
-        self.btn_gen_ai.setEnabled(True)
-        
-        # MEJORA DE FLUJO: Solo llenar los campos, NO resolver automáticamente.
-        self.m_input.setText(data.get('enunciado_M', ''))
-        self.n_input.setText(data.get('enunciado_N', ''))
-        
-        # Limpiar resultados anteriores para evitar confusión
-        while self.steps_layout.count():
-            child = self.steps_layout.takeAt(0)
-            if child.widget(): child.widget().deleteLater()
-        self.final_res_viewer.set_formula("")
-        
-        self.status_lbl.setText("✅ Ejercicio Cargado. Dale a Resolver.")
-        QMessageBox.information(self, "Ejercicio Generado", "La IA ha creado un nuevo ejercicio.\n\nAnaliza las funciones M y N en los campos de texto y presiona 'Resolver' cuando estés listo para ver la solución.")
-
-    def on_ai_error(self, err_msg):
-        self.btn_gen_ai.setEnabled(True)
-        self.status_lbl.setText("❌ Error IA")
-        QMessageBox.warning(self, "Error", f"{err_msg}")
-
-    def open_explanation_dialog(self, step_data):
-        context = f"ED: ({self.m_input.text()})dx + ({self.n_input.text()})dy = 0"
-        data = {"contexto": context, "paso_titulo": step_data['titulo'], "formula": step_data['formula']}
-        
-        self.dialog = ExplanationDialog(self)
-        self.dialog.show()
-        
-        self.explainer_thread = AIWorker("explain", data)
-        self.explainer_thread.finished_explanation.connect(self.dialog.set_text)
-        self.explainer_thread.start()
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainApp()
-    window.show()
-    sys.exit(app.exec())
+else:
+    st.info("👈 Usa el menú lateral para comenzar.")
