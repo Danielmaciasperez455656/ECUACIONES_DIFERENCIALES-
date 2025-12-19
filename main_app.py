@@ -13,10 +13,35 @@ try:
 except:
     API_KEY = "" 
 
-# --- 3. FUNCIONES AUXILIARES (MEJORADAS) ---
+# --- 3. FUNCIONES AUXILIARES (CORREGIDA PARA EVITAR ERROR 404) ---
 def get_ai_data(prompt_text):
     if not API_KEY:
         st.error("⚠️ Error: No se encontró la API KEY en los Secrets.")
+        return None
+    
+    # INTENTO 1: Usamos 'gemini-1.5-flash-latest' (Suele arreglar el error 404)
+    model = "gemini-1.5-flash-latest"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
+    
+    headers = {'Content-Type': 'application/json'}
+    data = {"contents": [{"parts": [{"text": prompt_text}]}]}
+
+    try:
+        resp = requests.post(url, headers=headers, json=data)
+        
+        # Si falla (ej: 404), intentamos con el modelo clásico 'gemini-pro'
+        if resp.status_code != 200:
+            # INTENTO 2: Fallback a gemini-pro
+            url_backup = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={API_KEY}"
+            resp = requests.post(url_backup, headers=headers, json=data)
+            
+            if resp.status_code != 200:
+                st.error(f"Error de Google ({resp.status_code}): {resp.text}")
+                return None
+            
+        return resp.json()['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
         return None
     
     # CAMBIO IMPORTANTE: Usamos 'gemini-1.5-flash' que es más estable
@@ -44,8 +69,8 @@ with st.sidebar:
     st.write("Tecnología en Desarrollo de Software")
     
     # LOGO (Opcional)
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=120)
+    if os.path.exists("logo.jpeg"):
+        st.image("logo.jpeg", width=120)
     
     st.divider()
     
